@@ -1,0 +1,61 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to keep API keys out of your AI agent | 1Claw</title>
+<meta name="description" content="AI agents open new ways for API keys to leak: the context window, tool arguments, and logs. Here is how to keep secrets out of the agent entirely.">
+<link rel="canonical" href="https://redbotster.github.io/agent-security-guides/keep-api-keys-out-of-ai-agents.html">
+<style>
+body{margin:0;background:#0E0D10;color:#FAFAFA;font-family:'Geist',system-ui,-apple-system,sans-serif;line-height:1.65}
+.w{max-width:720px;margin:0 auto;padding:44px 20px 80px}
+a{color:#E21D20;text-decoration:none}a:hover{text-decoration:underline}
+h1{font-size:32px;line-height:1.12;letter-spacing:-.02em;margin:0 0 8px}
+h2{font-size:22px;margin:34px 0 10px}h3{font-size:17px;margin:22px 0 6px}
+.eye{font-family:'Geist Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#6b6774}
+p,li{color:#d7d5dc}code{font-family:'Geist Mono',monospace;background:#1e1b23;padding:.1em .4em;border-radius:5px;font-size:.9em}
+pre{background:#161419;border:1px solid #2b2732;border-radius:10px;padding:14px 16px;overflow-x:auto}pre code{background:none;padding:0}
+.cta{margin-top:36px;background:#161419;border:1px solid #2b2732;border-left:3px solid #E21D20;border-radius:12px;padding:18px 20px}
+.cta code{color:#E21D20}
+footer{margin-top:34px;padding-top:18px;border-top:1px solid #2b2732;color:#6b6774;font-size:13px}
+</style></head><body><div class="w">
+<div class="eye">1Claw · agent security guide</div>
+<h1>How to keep API keys out of your AI agent</h1>
+
+<p>When you give an AI agent a real capability, you give it a real credential: an API key, an OAuth token, sometimes a wallet. The way most agents ship, that secret sits in an environment variable and gets read into memory at startup. That was an acceptable pattern for a web server. It is a bad one for an agent, because an agent has far more ways to leak the value than a web server ever did.</p>
+
+<h2>Why agents leak secrets that servers do not</h2>
+<p>A traditional service reads a key, uses it to sign an outbound request, and never exposes it again. An agent is different in three ways that matter:</p>
+<ul>
+<li><strong>The context window.</strong> Agents assemble prompts from many sources, and it is easy for a key in the environment or a config object to get serialized into a prompt, a system message, or a tool description. Everything in that window travels to a third-party inference API and is often retained there.</li>
+<li><strong>Tool call arguments.</strong> When an agent calls a tool, the arguments are model-generated text. A prompt-injected model can be steered into putting a secret it holds into an argument, a log line, or a reply.</li>
+<li><strong>Logs and traces.</strong> Agent frameworks log prompts, completions, and tool I/O by default for debugging. A key that touches any of that is a key in your logs.</li>
+</ul>
+<p>A 2026 study of more than 10,000 MCP servers found credentials leaking in over 10 percent of them, largely through tool descriptions and prompt templates that embedded real values. This is not a corner case.</p>
+
+<h2>The patterns to stop using</h2>
+<h3>Putting the key in the system prompt</h3>
+<p>The fastest way to wire an agent to an API is to paste the key into the instructions. Do not. Anything in the prompt is one injection away from being echoed back.</p>
+<pre><code>// bad: the key is now in every request to the model
+const system = `You are a support agent. Use API key ${process.env.SUPPORT_API_KEY}.`;</code></pre>
+
+<h3>Reading raw keys into the agent process</h3>
+<p>Even if the key never reaches the prompt, holding it in <code>process.env</code> means a compromised dependency, a poisoned tool, or an over-eager code path can read and exfiltrate it. The agent does not need the key. It needs the <em>result</em> of an action that uses the key.</p>
+
+<h2>The principle: use a secret without holding it</h2>
+<p>The durable fix is to make the agent a principal that can <em>use</em> a secret without ever possessing its raw bytes. Three ideas, in increasing strength:</p>
+<ul>
+<li><strong>Fetch just-in-time, never persist.</strong> Pull the secret at the moment of use from a store the model has no path to, use it for one outbound call, and drop it. It never lands in <code>.env</code> or the prompt.</li>
+<li><strong>Scope and time-box access.</strong> Give the agent a short-lived, narrowly scoped token instead of the real key. If it leaks, it expires and only ever reached one path.</li>
+<li><strong>Keep the secret server-side entirely.</strong> Proxy the outbound call through a service that injects the credential, so the agent references a binding, not a value. For signing, sign in an enclave so the private key never leaves it.</li>
+</ul>
+
+<h2>Screen untrusted input, too</h2>
+<p>Keeping keys out of reach handles exfiltration. The other half is not acting on hostile input in the first place. Before your agent acts on a fetched web page, a tool result, or a user message, screen it for injection, PII, and dangerous encodings, and refuse the ones that fail.</p>
+
+<h2>Where 1Claw fits</h2>
+<p>1Claw is one implementation of the pattern above. Secrets live in an HSM-backed vault; an agent authenticates with a scoped API key, receives a short-lived token, and only ever references a secret path, so the raw key never touches the model context, environment, or logs. Access is scoped, audited, and revocable. For onchain agents it signs transactions without exposing private keys, and it can route model traffic through a TEE proxy that redacts secrets and scores prompt injection. You can screen untrusted content locally with no account: <code>ONECLAW_LOCAL_ONLY=true npx -y @1claw/mcp</code> exposes an <code>inspect_content</code> tool. None of this is required to apply the principle, but it is the shortest path to it.</p>
+
+<h2>Takeaway</h2>
+<p>Do not ask how to store your agent's API key safely. Ask why the agent holds the raw key at all. Fetch it just-in-time, scope and time-box it, or keep it server-side entirely, and screen what the agent reads. An agent that never possesses a secret cannot leak one.</p>
+
+<div class="cta"><b>Try it in ten seconds, no account:</b> screen any text your agent is about to act on for prompt injection, PII, and command injection.<br><br><code>ONECLAW_LOCAL_ONLY=true npx -y @1claw/mcp</code><br><br>When you are ready to keep real keys out of your agent entirely, 1Claw stores them in an HSM-backed vault and hands the agent short-lived scoped tokens. <a href="https://1claw.xyz/for-ai">1claw.xyz/for-ai</a> · <a href="https://docs.1claw.xyz">docs</a> · <a href="https://github.com/redbotster/secure-agent-starter">starter</a></div>
+<footer><a href="./">All guides</a> · 1Claw, secret management for AI agents</footer>
+</div></body></html>
