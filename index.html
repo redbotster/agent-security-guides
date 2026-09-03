@@ -2,21 +2,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Agent Security Guides | 1Claw</title>
 <meta name="description" content="Practical guides on keeping secrets out of AI agents, defending against prompt injection, and securing agent credentials.">
+<link rel="canonical" href="https://redbotster.github.io/agent-security-guides/index.html">
 <style>
 body{margin:0;background:#0E0D10;color:#FAFAFA;font-family:'Geist',system-ui,-apple-system,sans-serif;line-height:1.65}
 .w{max-width:720px;margin:0 auto;padding:44px 20px 80px}
 a{color:#E21D20;text-decoration:none}a:hover{text-decoration:underline}
-h1{font-size:32px;letter-spacing:-.02em;margin:0 0 8px}
+h1{font-size:32px;line-height:1.12;letter-spacing:-.02em;margin:0 0 8px}
+h2{font-size:22px;margin:34px 0 10px}h3{font-size:17px;margin:22px 0 6px}
 .eye{font-family:'Geist Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#6b6774}
-p,li{color:#d7d5dc}ul{padding-left:20px}li{margin:8px 0}
+p,li{color:#d7d5dc}code{font-family:'Geist Mono',monospace;background:#1e1b23;padding:.1em .4em;border-radius:5px;font-size:.9em}
+pre{background:#161419;border:1px solid #2b2732;border-radius:10px;padding:14px 16px;overflow-x:auto}pre code{background:none;padding:0}
+.cta{margin-top:36px;background:#161419;border:1px solid #2b2732;border-left:3px solid #E21D20;border-radius:12px;padding:18px 20px}
+.cta code{color:#E21D20}
 footer{margin-top:34px;padding-top:18px;border-top:1px solid #2b2732;color:#6b6774;font-size:13px}
 </style></head><body><div class="w">
-<div class="eye">1Claw</div>
+<div class="eye">1Claw · agent security guide</div>
 <h1>AI Agent Security Guides</h1>
-<p>Practical, no-nonsense guides on keeping secrets out of AI agents and defending against prompt injection.</p>
-<ul>
-<li><a href="state-of-agent-secret-security-2026.html">The State of AI Agent Secret Security (2026)</a> - report</li>
-<li><a href="keep-api-keys-out-of-ai-agents.html">How to keep API keys out of your AI agent</a></li>
-</ul>
-<footer>1Claw, secret management for AI agents · <a href="https://1claw.xyz/for-ai">1claw.xyz/for-ai</a></footer>
+<p>Practical, no-nonsense guides on keeping secrets out of AI agents and defending against prompt injection.</p><ul><li><a href="keep-api-keys-out-of-ai-agents.html">How to keep API keys out of your AI agent</a></li><li><a href="is-it-safe-to-give-ai-agent-api-keys.html">Is it safe to give an AI agent your API keys?</a></li></ul>
+<div class="cta"><b>Try it in ten seconds, no account:</b> screen any text your agent is about to act on for prompt injection, PII, and command injection.<br><br><code>ONECLAW_LOCAL_ONLY=true npx -y @1claw/mcp</code><br><br>When you are ready to keep real keys out of your agent entirely, 1Claw stores them in an HSM-backed vault and hands the agent short-lived scoped tokens. <a href="https://1claw.xyz/for-ai">1claw.xyz/for-ai</a> · <a href="https://docs.1claw.xyz">docs</a> · <a href="https://github.com/redbotster/secure-agent-starter">starter</a></div>
+<footer><a href="./">All guides</a> · 1Claw, secret management for AI agents</footer>
 </div></body></html>
