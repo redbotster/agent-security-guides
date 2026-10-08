@@ -1,0 +1,118 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Securing wallet keys for onchain AI agents | 1Claw</title>
+<meta name="description" content="The threat model is different for agents
+
+A human developer who stores a private key in .env at least controls when that file is read and by whom. An AI ag">
+<link rel="canonical" href="https://redbotster.github.io/agent-security-guides/ai-agent-wallet-key-security.html">
+<style>
+body{margin:0;background:#0E0D10;color:#FAFAFA;font-family:'Geist',system-ui,-apple-system,sans-serif;line-height:1.65}
+.w{max-width:720px;margin:0 auto;padding:44px 20px 80px}
+a{color:#E21D20;text-decoration:none}a:hover{text-decoration:underline}
+h1{font-size:32px;line-height:1.12;letter-spacing:-.02em;margin:0 0 8px}
+h2{font-size:22px;margin:34px 0 10px}h3{font-size:17px;margin:22px 0 6px}
+.eye{font-family:'Geist Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#6b6774}
+p,li{color:#d7d5dc}code{font-family:'Geist Mono',monospace;background:#1e1b23;padding:.1em .4em;border-radius:5px;font-size:.9em}
+pre{background:#161419;border:1px solid #2b2732;border-radius:10px;padding:14px 16px;overflow-x:auto}pre code{background:none;padding:0}
+.cta{margin-top:36px;background:#161419;border:1px solid #2b2732;border-left:3px solid #E21D20;border-radius:12px;padding:18px 20px}
+.cta code{color:#E21D20}
+footer{margin-top:34px;padding-top:18px;border-top:1px solid #2b2732;color:#6b6774;font-size:13px}
+</style></head><body><div class="w">
+<div class="eye">1Claw · agent security guide</div>
+<h1>Securing wallet keys for onchain AI agents</h1>
+<h2>The threat model is different for agents</h2>
+
+<p>A human developer who stores a private key in <code>.env</code> at least controls when that file is read and by whom. An AI agent is different: it processes arbitrary text from external sources, calls tools dynamically, and can be manipulated into surfacing or logging data it was never supposed to touch. The attack surface for credential theft expands at every layer of the stack.</p>
+
+<p>The three places wallet keys most commonly leak in agent systems are the model context window, environment variables that get serialized into logs or tool calls, and MCP servers that handle secrets without isolation. A 2026 study of more than 10,000 MCP servers found credentials leaking in over 10 percent of them. This guide covers how to think about each layer and what patterns actually help.</p>
+
+<h2>Never put a private key where the model can see it</h2>
+
+<p>The most common mistake is treating key management for agents the same as for a backend service. A backend service reads an environment variable once at startup and uses it in tightly scoped code. An agent can be prompted, via a malicious tool response or injected user message, to repeat, summarize, or log anything in its context. If your private key is in the system prompt, a tool call result, or an environment variable the agent framework serializes into its reasoning trace, it is one prompt injection away from exfiltration.</p>
+
+<p>The bad pattern looks like this:</p>
+
+<pre><code># Bad: key lives in env, agent reads it directly
+import os
+from my_agent import run
+
+private_key = os.getenv("WALLET_PRIVATE_KEY")
+run(agent_context={"wallet_key": private_key, "task": user_task})
+</code></pre>
+
+<p>Even if you never log <code>agent_context</code>, many agent frameworks serialize the full context for tracing, retries, or memory. The key is now in your observability stack.</p>
+
+<p>The better pattern keeps the raw key entirely outside the agent:</p>
+
+<pre><code># Better: agent holds a path reference, not the key
+# Signing happens in a separate process that the agent never controls directly
+run(agent_context={"wallet_path": "wallets/mainnet/deployer", "task": user_task})
+
+# Signing service, called by a tool, reads the key from a vault
+# and returns only the signed transaction hex
+def sign_transaction(wallet_path: str, tx: dict) -> str:
+    key = vault.get_secret(wallet_path)          # key never returned to agent
+    return sign_with_key(key, tx)
+</code></pre>
+
+<p>The agent only ever sees a path identifier and the signed transaction output. The raw key is handled by a process the model cannot directly introspect.</p>
+
+<h2>Key storage: what your options actually are</h2>
+
+<h3>Hardware Security Modules</h3>
+
+<p>An HSM stores private key material in tamper-resistant hardware and exposes a signing interface. The key never leaves the device. Cloud HSMs (AWS CloudHSM, Google Cloud HSM) bring this to managed infrastructure. The tradeoff is cost and operational complexity. HSMs are the right answer when you are managing keys for production systems with real funds at risk.</p>
+
+<h3>Cloud KMS with envelope encryption</h3>
+
+<p>AWS KMS, GCP KMS, and Azure Key Vault let you store secrets with access policies, audit logs, and key rotation without managing hardware. They are not HSMs in the strict sense, but they provide meaningful isolation from application code. Use IAM roles scoped to the minimum necessary operations, and never grant your agent's runtime identity the ability to export key material, only to call the signing API.</p>
+
+<h3>Short-lived credentials</h3>
+
+<p>Whatever storage backend you use, the principle is the same: the agent should authenticate with a scoped, short-lived credential, not a long-lived master key. A credential that expires in 15 minutes has a much smaller blast radius than one that never rotates. This applies equally to API keys for external services the agent uses, not just wallet private keys.</p>
+
+<h2>Transaction signing without key exposure</h2>
+
+<p>For EVM chains, you can structure your signing flow so the agent constructs an unsigned transaction and a separate service handles the signature. The agent calls a tool like <code>request_signature(tx_data, wallet_id)</code> and gets back a signed hex string. It never needs the private key to construct or submit the transaction.</p>
+
+<p>For non-EVM chains the same architecture applies, though the transaction format differs. The key is that the boundary between "agent decides what to sign" and "key material signs it" is a meaningful security boundary. Crossing that boundary should require an explicit, audited action, not just a variable lookup.</p>
+
+<p>Consider also whether your agent should be signing transactions at all without a human approval step for high-value actions. An agent that can unilaterally sign arbitrary transactions is a much larger target than one that queues transactions for human review above a threshold.</p>
+
+<h2>Prompt injection and MCP servers</h2>
+
+<p>Prompt injection is the scenario where a malicious payload in tool output, a web page, or an external document instructs the model to take unintended actions, including exfiltrating credentials. When your agent calls external tools or reads external data, treat that content as untrusted input, the same way you treat user input in a web application.</p>
+
+<p>MCP servers introduce a specific risk: they often hold credentials to call downstream services, and if those credentials are embedded in the server's environment or returned in tool responses, they can appear in the model's context. The credential leakage rate found in the wild study cited above is high enough that this should be treated as a default-on risk, not an edge case.</p>
+
+<p>At minimum, audit what your MCP servers return in their responses. Credentials should never appear in tool output even as a side effect of normal operation.</p>
+
+<h2>Where 1Claw fits</h2>
+
+<p>1Claw is an HSM-backed secret management service built for AI agents. The agent authenticates with a scoped API key, gets a short-lived token, and references secrets by path. The raw key never lands in model context, environment variables, or logs. It signs EVM and non-EVM transactions without exposing private keys. Access is scoped, audited, and revocable.</p>
+
+<p>It also provides a TEE proxy for LLM traffic that redacts secrets and scores for prompt injection before the model sees them, which addresses the MCP leakage problem at the transport layer.</p>
+
+<p>For local inspection without creating an account, set <code>ONECLAW_LOCAL_ONLY=true</code> and run:</p>
+
+<pre><code>ONECLAW_LOCAL_ONLY=true npx -y @1claw/mcp
+</code></pre>
+
+<p>This exposes an <code>inspect_content</code> tool that checks for prompt injection, PII, and command injection. It costs nothing and requires no signup. Full docs are at <a href="https://docs.1claw.co">docs.1claw.co</a>. The free tier covers 1,000 API calls per month.</p>
+
+<h2>A practical checklist</h2>
+
+<ul>
+  <li>Private keys never appear in agent context, system prompts, or tool call parameters.</li>
+  <li>Signing happens in a process the model cannot directly read from or write to.</li>
+  <li>Credentials are short-lived and scoped to the minimum necessary operations.</li>
+  <li>All signing actions are logged with enough context to reconstruct what was authorized and why.</li>
+  <li>Credentials are revocable individually, not tied to a shared master key.</li>
+  <li>Tool and MCP server responses are treated as untrusted input and scanned for injection before reaching the model.</li>
+  <li>High-value transaction signing includes a human approval step or a rate limit.</li>
+</ul>
+
+<p>The core principle is the same one that applies to any privileged credential in a software system: minimize who can see it, minimize how long it is valid, and log every time it is used. The difference with agents is that "who can see it" now includes the model itself, and you have less control over what the model does with what it sees.</p>
+<div class="cta"><b>Try it in ten seconds, no account:</b> screen any text your agent is about to act on for prompt injection, PII, and command injection.<br><br><code>ONECLAW_LOCAL_ONLY=true npx -y @1claw/mcp</code><br><br>When you are ready to keep real keys out of your agent entirely, 1Claw stores them in an HSM-backed vault and hands the agent short-lived scoped tokens. <a href="https://1claw.co/for-ai">1claw.co/for-ai</a> · <a href="https://docs.1claw.co">docs</a> · <a href="https://github.com/redbotster/secure-agent-starter">starter</a></div>
+<footer><a href="./">All guides</a> · 1Claw, secret management for AI agents</footer>
+</div></body></html>
